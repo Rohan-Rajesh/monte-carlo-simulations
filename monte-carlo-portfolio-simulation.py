@@ -71,7 +71,10 @@ def getData(stocks, start, end, api_key):
     if stockData.empty:
         raise ValueError("No stock data retrieved successfully")
     
-    returns = stockData.pct_change().dropna()
+	# Simple Returns
+    # returns = stockData.pct_change().dropna()
+	# Log Returns
+    returns = np.log(stockData / stockData.shift(1)).dropna()
     meanReturns = returns.mean()
     covMatrix = returns.cov()
     
@@ -143,7 +146,8 @@ def main():
 		weightedReturns = np.dot(randomReturns, weights)
 
 		for t in range(T):
-			simulations[i, t + 1] = simulations[i, t] * (1 + weightedReturns[t])
+			# simulations[i, t + 1] = simulations[i, t] * (1 + weightedReturns[t])
+			simulations[i, t + 1] = simulations[i, t] * np.exp(weightedReturns[t])  # Using log returns for compounding
 
 	finalPortfolio = simulations[:, -1]
 
