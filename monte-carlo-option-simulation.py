@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
+from scipy.stats import norm
 from typing import Dict
 
 class MonteCarloPortfolioSimulator:
@@ -8,7 +9,7 @@ class MonteCarloPortfolioSimulator:
     Monte Carlo Simulation for a multi-asset weighted portfolio.
     """
     
-    def __init__(self, strike, volatility, option_type = "C" , risk_free_rate = 0.04):
+    def __init__(self, strike, stock_price, volatility, option_type = "C" , risk_free_rate = 0.04):
         """
         Initialize the Monte Carlo portfolio simulator.
         
@@ -24,6 +25,7 @@ class MonteCarloPortfolioSimulator:
         self.strike = strike
         self.risk_free_rate = risk_free_rate
         self.volatility = volatility
+        self.stock_price = stock_price
 
         if (option_type not in ["C", "P"]):
             raise ValueError("Option Type must be either 'C' for call or 'P' for put")
@@ -48,7 +50,7 @@ class MonteCarloPortfolioSimulator:
         # Initialize price paths with initial stock value
         price_paths = np.zeros((n_simulations, n_days + 1))
         price_paths[:, 0] = initial_stock_price
-        
+
         for day in range(n_days):
             # Generate random independent shocks
             base_shocks = np.random.standard_normal(n_simulations // 2)
@@ -61,7 +63,7 @@ class MonteCarloPortfolioSimulator:
             price_paths[:, day + 1] = price_paths[:, day] * np.exp(drift + diffusion)
         
         return price_paths
-    
+
     def calculate_option_value(self, price_paths: np.ndarray) -> np.ndarray:
         """
         Calculate portfolio value paths from individual stock price paths.
@@ -73,12 +75,22 @@ class MonteCarloPortfolioSimulator:
             Portfolio value paths (n_simulations x n_days+1)
         """
         final_values = price_paths[:, -1]
-        final_payoffs = np.maximum(final_values - self.strike, 0)
         trading_days = 252
         time_to_expiry = (len(price_paths[0]) - 1) / trading_days
-
+        
+        # Monte Carlo Payoffs
+        final_payoffs = np.maximum(final_values - self.strike, 0)
         discounted_option_values = final_payoffs * np.exp(-self.risk_free_rate * time_to_expiry)
+
         return discounted_option_values
+    
+    def _black_scholes_computation(self, time_to_expiry, option_type = "C"):
+        d1 = (np.log(self.stock_price / self.strike) + (self.risk_free_rate + 0.5 * self.volatility ** 2) * time_to_expiry) / (self.volatility* np.sqrt(time_to_expiry))
+        d2 = d1 - self.volatility * np.sqrt(time_to_expiry)
+        if option_type == 'C':
+            return self.stock_price * norm.cdf(d1) - self.strike * np.exp(-self.risk_free_rate * time_to_expiry) * norm.cdf(d2)
+        else:
+            return self.strike * np.exp(-self.risk_free_rate * time_to_expiry) * norm.cdf(-d2) - self.stock_price * norm.cdf(-d1)
     
     def calculate_risk_metrics(self, initial_stock_price, final_option_values: np.ndarray) -> Dict:
         """
@@ -187,7 +199,7 @@ def main():
     strike = 624
     initial_stock_price = 624
 
-    simulator = MonteCarloPortfolioSimulator(strike, volatility, "C", risk_free_rate)
+    simulator = MonteCarloPortfolioSimulator(strike, stock_price, volatility, "C", risk_free_rate)
     
     print("Running Monte Carlo simulation...")
     price_paths = simulator.simulate_paths(initial_stock_price, n_simulations=5000, n_days=252)
