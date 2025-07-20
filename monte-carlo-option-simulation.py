@@ -3,14 +3,14 @@ import matplotlib.pyplot as plt
 import requests
 from typing import Dict
 
-class MonteCarloPortfolioSimulator:
+class MonteCarloOptionSimulator:
     """
-    Monte Carlo Simulation for a multi-asset weighted portfolio.
+    Monte Carlo Simulation for an option on a stock.
     """
     
     def __init__(self, strike, volatility, option_type = "C" , risk_free_rate = 0.04):
         """
-        Initialize the Monte Carlo portfolio simulator.
+        Initialize the Monte Carlo option simulator.
         
         Args:
             strike: The strike price of the option being priced
@@ -32,7 +32,7 @@ class MonteCarloPortfolioSimulator:
     def simulate_paths(self, initial_stock_price, n_simulations: int, n_days: int, 
                       trading_days: int = 252) -> np.ndarray:
         """
-        Generate Monte Carlo price paths for all stocks in the portfolio.
+        Generate Monte Carlo price paths for prices that the stock can take.
         
         Args:
             n_simulations: Number of Monte Carlo simulations
@@ -64,16 +64,22 @@ class MonteCarloPortfolioSimulator:
     
     def calculate_option_value(self, price_paths: np.ndarray) -> np.ndarray:
         """
-        Calculate portfolio value paths from individual stock price paths.
+        Calculate final option value from stock price paths.
         
         Args:
             price_paths: Dictionary of stock price paths
         
         Returns:
-            Portfolio value paths (n_simulations x n_days+1)
+            Final option payoffs of all simulations
         """
         final_values = price_paths[:, -1]
-        final_payoffs = np.maximum(final_values - self.strike, 0)
+        
+        # Calculate payoffs based on option type
+        if self.option_type == "C":
+            final_payoffs = np.maximum(final_values - self.strike, 0)
+        else:  # option_type == "P"
+            final_payoffs = np.maximum(self.strike - final_values, 0)
+            
         trading_days = 252
         time_to_expiry = (len(price_paths[0]) - 1) / trading_days
 
@@ -113,12 +119,13 @@ class MonteCarloPortfolioSimulator:
         Create comprehensive visualization of simulation results.
         
         Args:
-            portfolio_values: Portfolio value paths from simulation
+            price_paths: Monte carlo simulation prices of the stock
+            final_option_values: Final option payoffs of all simulations
             n_paths_to_plot: Number of individual paths to display
         """
         fig, axes = plt.subplots(1, 2, figsize=(15, 8))
         
-        # Sample portfolio paths
+        # Sample stock paths
         sample_indices = np.random.choice(
             price_paths.shape[0], 
             min(n_paths_to_plot, price_paths.shape[0]), 
@@ -137,9 +144,9 @@ class MonteCarloPortfolioSimulator:
         percentile_95 = np.percentile(price_paths, 95, axis=0)
         axes[0].fill_between(range(len(mean_path)), percentile_5, percentile_95, 
                       alpha=0.2, color='red', label='90% Confidence Interval')
-        axes[0].set_title('Monte Carlo Portfolio Paths')
+        axes[0].set_title('Monte Carlo Price Paths')
         axes[0].set_xlabel('Trading Days')
-        axes[0].set_ylabel('Portfolio Value ($)')
+        axes[0].set_ylabel('Stock Value ($)')
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
         
@@ -187,7 +194,7 @@ def main():
     strike = 624
     initial_stock_price = 624
 
-    simulator = MonteCarloPortfolioSimulator(strike, volatility, "C", risk_free_rate)
+    simulator = MonteCarloOptionSimulator(strike, volatility, "C", risk_free_rate)
     
     print("Running Monte Carlo simulation...")
     price_paths = simulator.simulate_paths(initial_stock_price, n_simulations=5000, n_days=252)
