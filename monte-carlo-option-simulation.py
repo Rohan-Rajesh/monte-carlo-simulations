@@ -8,7 +8,7 @@ class MonteCarloOptionSimulator:
     Monte Carlo Simulation for an option on a stock.
     """
     
-    def __init__(self, strike, volatility, option_type = "C" , risk_free_rate = 0.04):
+    def __init__(self, strike, volatility, option_type = "C" , risk_free_rate = 0.04, barrier: float = None, barrier_type: str = None):
         """
         Initialize the Monte Carlo option simulator.
         
@@ -24,6 +24,8 @@ class MonteCarloOptionSimulator:
         self.strike = strike
         self.risk_free_rate = risk_free_rate
         self.volatility = volatility
+        self.barrier = barrier
+        self.barrier_type = barrier_type
 
         if (option_type not in ["C", "P"]):
             raise ValueError("Option Type must be either 'C' for call or 'P' for put")
@@ -48,6 +50,8 @@ class MonteCarloOptionSimulator:
         # Initialize price paths with initial stock value
         price_paths = np.zeros((n_simulations, n_days + 1))
         price_paths[:, 0] = initial_stock_price
+        # Track which paths have breached the barrier
+        barrier_breached = np.zeros(n_simulations, dtype=bool)
         
         for day in range(n_days):
             # Generate random independent shocks
@@ -59,10 +63,16 @@ class MonteCarloOptionSimulator:
             
             # Apply geometric Brownian motion
             price_paths[:, day + 1] = price_paths[:, day] * np.exp(drift + diffusion)
+
+            if self.barrier is not None and self.barrier_type is not None:
+                if self.barrier_type == "up-and-out":
+                    barrier_breached |= (price_paths[:, day + 1] >= self.barrier)
+                elif self.barrier_type == "down-and-out":
+                    barrier_breached |= (price_paths[:, day + 1] <= self.barrier)
         
-        return price_paths
+        return price_paths, barrier_breached
     
-    def calculate_option_value(self, price_paths: np.ndarray) -> np.ndarray:
+    def calculate_option_value(self, price_paths: np.ndarray, barrier_breached) -> np.ndarray:
         """
         Calculate final option value from stock price paths.
         
@@ -79,6 +89,9 @@ class MonteCarloOptionSimulator:
             final_payoffs = np.maximum(final_values - self.strike, 0)
         else:  # option_type == "P"
             final_payoffs = np.maximum(self.strike - final_values, 0)
+
+        if (barrier_breached is not None):
+            final_payoffs = np.where(barrier_breached, 0, final_payoffs)
             
         trading_days = 252
         time_to_expiry = (len(price_paths[0]) - 1) / trading_days
@@ -194,11 +207,11 @@ def main():
     strike = 624
     initial_stock_price = 624
 
-    simulator = MonteCarloOptionSimulator(strike, volatility, "C", risk_free_rate)
+    simulator = MonteCarloOptionSimulator(strike=strike, volatility=volatility, option_type="C", risk_free_rate=risk_free_rate, barrier=800, barrier_type="up-and-out")
     
     print("Running Monte Carlo simulation...")
-    price_paths = simulator.simulate_paths(initial_stock_price, n_simulations=5000, n_days=252)
-    final_option_values = simulator.calculate_option_value(price_paths)
+    price_paths, barrier_breached = simulator.simulate_paths(initial_stock_price, n_simulations=5000, n_days=252)
+    final_option_values = simulator.calculate_option_value(price_paths, barrier_breached)
     
     risk_metrics = simulator.calculate_risk_metrics(initial_stock_price, final_option_values)
     
