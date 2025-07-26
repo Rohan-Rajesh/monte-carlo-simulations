@@ -1,5 +1,7 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from arch import arch_model
 import requests
 from typing import Dict
 
@@ -177,7 +179,7 @@ class MonteCarloOptionSimulator:
         plt.tight_layout()
         plt.show()
 
-def compute_historical_volatility(stock_ticker = "SPY"):
+def compute_historical_volatility(stock_ticker = "SPY", trading_days=252):
     """
 
     """
@@ -185,38 +187,69 @@ def compute_historical_volatility(stock_ticker = "SPY"):
     r = requests.get(url)
     data = r.json()
     data = data['Time Series (Daily)']
-    data = [float(data[date]['4. close']) for date in data.keys()]
-    data = np.array(data)
+    df = pd.DataFrame.from_dict(data, orient='index')
+    df.index = pd.to_datetime(df.index)
 
-    recent_21_prices = data[-21:]
-    returns_21_day = np.log(recent_21_prices[1:] / recent_21_prices[:-1])
-    vol_21_day = np.std(returns_21_day) * np.sqrt(252)
-    recent_5_prices = data[-5:]
-    returns_5_day = np.log(recent_5_prices[1:] / recent_5_prices[:-1])
-    vol_5_day = np.std(returns_5_day) * np.sqrt(252)
+    close_prices = df['4. close'].astype(float)
+    returns = np.log(close_prices / close_prices.shift(1))
+    returns = returns.dropna()
 
-    volatility = (0.7 * vol_21_day) + (0.3 * vol_5_day)
+    # GARCH Model
+    n = len(returns)
+    split_point = int(n * 0.8)
+    train_data = returns[:split_point]
+    test_data = returns[split_point:]
 
-    return volatility
+    best_params = _find_best_garch_parameters(train_data=train_data)
+    print("params: ", best_params)
 
+    model = arch_model(train_data, mean='Zero', vol='GARCH', p=best_params[0], q=best_params[1])
+    model_fit = model.fit()
+    predicted_vol = model_fit.forecast(horizon=len(test_data))
+    variance_forecast = predicted_vol.variance.values[-1:]
+    volatility_forecast = np.sqrt(variance_forecast * trading_days)
 
+    realized_vol = np.sqrt(np.mean(test_data**2) * 252)
+    avg_predicted = np.mean(volatility_forecast)
+    error = abs(avg_predicted - realized_vol)
+
+    print("error: ", error)
+    print("vol: ", volatility_forecast[-1])
+
+    return volatility_forecast[-1]
+
+def _find_best_garch_parameters(train_data):
+    max_val = 3
+    best_params = (1, 1)
+    best_aic = float("inf")
+
+    for p in range(1, max_val + 1):
+        for q in range(1, max_val + 1):
+            model = arch_model(train_data, mean='Zero', p=p, q=q)
+            model_fit = model.fit(disp="off")
+            if (model_fit.aic < best_aic):
+                best_aic = model_fit.aic
+                best_params = (p, q)
+
+    return best_params
 
 def main():
     risk_free_rate = 0.04
-    volatility = compute_historical_volatility()
-    strike = 624
-    initial_stock_price = 624
+    volatility = compute_historical_volatility(stock_ticker="TATAMOTORS.BSE")
+    strike = 700
+    initial_stock_price = 700
 
-    simulator = MonteCarloOptionSimulator(strike=strike, volatility=volatility, option_type="C", risk_free_rate=risk_free_rate, barrier=800, barrier_type="up-and-out")
+    simulator = MonteCarloOptionSimulator(strike=strike, volatility=0.24, option_type="C", risk_free_rate=risk_free_rate)
     
     print("Running Monte Carlo simulation...")
-    price_paths, barrier_breached = simulator.simulate_paths(initial_stock_price, n_simulations=5000, n_days=252)
+    price_paths, barrier_breached = simulator.simulate_paths(initial_stock_price, n_simulations=20000, n_days=7, trading_days=252)
     final_option_values = simulator.calculate_option_value(price_paths, barrier_breached)
     
     risk_metrics = simulator.calculate_risk_metrics(initial_stock_price, final_option_values)
     
     print("="*50)
     print(f"Option Theoretical Value: {np.mean(final_option_values)}")
+    print(f"Volatility: {volatility:.2%}")
     print(f"Probability of Loss: {risk_metrics['probability_of_loss']:.2%}")
     print(f"Variance: {risk_metrics['variance']:.2f}")
     print(f"Standard Deviation: {risk_metrics['std']:.2f}")
